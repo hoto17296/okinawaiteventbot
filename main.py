@@ -4,6 +4,7 @@ import sys
 sys.path.append(os.path.join(os.path.abspath(os.path.dirname(__file__)), 'packages'))
 
 import re
+import json
 import urllib.request
 from time import sleep
 from datetime import date, datetime
@@ -19,6 +20,20 @@ class Event:
 
     def as_dynamodb_item(self):
         return {key: value2dynamo(self.__dict__[key]) for key in self.__dict__}
+        
+    def as_slack_attachment(self):
+        attachment = {
+            'fallback': self.title,
+            'title': self.title,
+            'title_link': self.url,
+            'text': self.place,
+            'ts': int(self.dt_start.timestamp()),
+        }
+        if self.thumbnail:
+            attachment['thumb_url'] = self.thumbnail
+        if self.community:
+            attachment['author_name'] = self.community
+        return attachment
 
 
 def crawl_pref_events(pref, page_begin=1, from_date=date.today().isoformat()):
@@ -80,6 +95,12 @@ def value2dynamo(v):
     if t == datetime: return {'N': str(int(v.timestamp()))}
     raise NotImplementedError(t)
 
+def post_slack(message):
+    """Slack に投稿する"""
+    url = os.environ.get('SLACK_INCOMING_WEBHOOK_URL')
+    body = json.dumps(message).encode('ascii')
+    req = urllib.request.Request(url, body)
+    urllib.request.urlopen(req)
 
 def handler(event, context):
     # Crawl
@@ -99,4 +120,5 @@ def handler(event, context):
     )
     for event in new_events:
         twitter.post('https://api.twitter.com/1.1/statuses/update.json', params={'status': event.url})
+        post_slack({'attachments': [event.as_slack_attachment()]})
         sleep(1)
